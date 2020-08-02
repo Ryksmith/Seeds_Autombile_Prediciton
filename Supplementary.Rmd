@@ -1,0 +1,638 @@
+---
+title: "Project_STA160"
+author: "Ryan Smith"
+date: "4/18/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+```{r, error = F, warning = F, message = F}
+library(tidyverse)
+library(corrgram)
+library(nnet)
+library(class)
+library(plotly)
+library(corrplot)
+library(RColorBrewer)
+library(ggplot2)
+library(lattice)
+library(MASS)
+library(devtools)
+#install_github("vqv/ggbiplot")
+library(ggbiplot)
+library(useful)
+library(randomForest)
+require(caTools)
+```
+
+
+##Loading Seeds Data
+```{r, warning = F, message = F}
+seeds <- read.table("~/Desktop/School/STA 160/STA_160_Project_Midterm/seeds_dataset.txt", quote="\"", comment.char="") 
+colnames(seeds) <- c("area", "perimeter", "compactness", "klength", "kwidth", "asym", "groovelength", "type")
+```
+
+
+##Exploratory
+```{r, warning = F, message = F}
+#Theres an even amount of each seed type
+nrow(filter(seeds,type == 3))
+ggplot(data = seeds, aes(x = type)) +
+  geom_histogram()
+
+
+corrgram(seeds, lower.panel = panel.pie)
+
+
+corrplot(cor(seeds))
+
+
+plot_ly(data = seeds, x = ~klength, y = ~groovelength)
+
+
+p <- ggplot(data = seeds, aes(klength, groovelength)) + geom_point()
+p + facet_grid(rows = vars(type)) + ggtitle("Kernel Length vs Groove Length, Faceted on Seed Type")
+
+
+
+splom(seeds[,c(3,4,6)], 
+      groups=seeds$type, 
+      main="Compactness vs Kernel Length vs Asymmetry")
+
+
+ggplot(data=seeds, aes(x=perimeter, fill = as.factor(type))) +
+  geom_histogram(alpha = 0.5)
+
+
+ggplot(data = seeds, aes(x = area,colour = as.factor(type))) +
+  geom_freqpoly()
+
+boxplot(klength ~ type, data =seeds)
+boxplot(perimeter ~ type, data =seeds)
+```
+
+
+######classification(Assigning each plant to type based on other features. split 70/30 train/test)
+```{r, warning = F, message = F}
+train = sample(1:210, 147, replace=FALSE)
+test = setdiff(1:210,train)
+seeds_class <- seeds 
+colnames(seeds_class) <- c("area", "perimeter", "compactness", "klength", "kwidth", "asym", "grooveLength", "class")
+
+data.tr = seeds_class[train,c(1:8)]
+data.te = seeds_class[test,c(1:8)]
+
+
+### LDA
+
+mpg.lda = lda(class ~ ., data.tr)
+
+mpg.pred.lda = predict(mpg.lda,grouping = type,  data.te)
+table(true = data.te$class, predicted = mpg.pred.lda$class)
+
+plot(table(data.te$class, mpg.pred.lda$class),  main="Confusion Matrix for LDA Classification",
+      xlab="True Type", ylab="LDA Classification Type")
+
+
+#Want to classify with random samples for the testing and training data 100 times .
+comparison100 <- 0
+for (i in 1:100){
+
+
+##Sample the test and training data randomly in 70/30% split. I am using the same testing and training data for all of the classification methods to compare which one is most accurate.
+train = sample(1:210, 147, replace=FALSE)
+test = setdiff(1:210,train)
+seeds_class <- seeds 
+colnames(seeds_class) <- c("area", "perimeter", "compactness", "klength", "kwidth", "asym", "grooveLength", "class")
+
+data.tr = seeds_class[train,c(1:8)]
+data.te = seeds_class[test,c(1:8)]
+
+
+### LDA
+
+mpg.lda = lda(class ~ ., data.tr)
+
+mpg.pred.lda = predict(mpg.lda,grouping = type,  data.te)
+mpg.confusion.lda = table(true = data.te$class, predicted = mpg.pred.lda$class)
+
+mpg.pred.lda_error = (mpg.confusion.lda[1,2] + mpg.confusion.lda[1,3] + mpg.confusion.lda[2,1]+ mpg.confusion.lda[2,3]+ mpg.confusion.lda[3,1]+ mpg.confusion.lda[3,2])/sum(mpg.confusion.lda)
+###Using Linear Discriminant Analysis, I fit a model based on the training data and applied it to the training data.
+### I was able to predict the labels of the testing data with 95.2381% Accuracy, and a 4.7619% error rate.
+
+
+###Multinomial Logistic regression
+log_model = multinom(class ~ ., data.tr)
+log_pred = predict(log_model, data.te, type = "class")
+log_con = table(true = data.te$class, predicted = log_pred)
+
+mpg.pred.log_reg_error = (log_con[1,2]+ log_con[1,3] + log_con[2,1]+ log_con[2,3]+ log_con[3,1] + log_con[3,2])/sum(log_con)
+##Using multinomial logistic regression, I fit a model based on the training data and applied it to the training d.
+### I was able to predict the labels of the testing data with 92.0635% Accuracy, and a 0.07936% error rate.
+
+###Kth Nearest Neighbors with k =5, 10, k=20  
+knn_pred5 = knn(
+  train = data.tr, 
+  test  = data.te,
+  cl    = data.tr$class,                   
+  k     = 5
+)
+
+knn_pred10 = knn(
+  train = data.tr, 
+  test  = data.te,
+  cl    = data.tr$class,                   
+  k     = 10
+)
+
+knn_pred20 = knn(
+  train = data.tr, 
+  test  = data.te,
+  cl    = data.tr$class,                   
+  k     = 20
+)
+
+#Contingency table showing true vs predicted
+knn_con5 = table(true = data.te$class, model = knn_pred5)
+
+knn_con10 = table(true = data.te$class, model = knn_pred10)
+
+knn_con20 = table(true = data.te$class, model = knn_pred20)
+
+#Compute the Knn error rates
+mpg.pred.knn_error5 = (knn_con5[1,2] + knn_con5[1,3] + knn_con5[2,1] + knn_con5[2,3] + knn_con5[3,1] + knn_con5[3,2])/sum(knn_con5)
+
+mpg.pred.knn_error10 = (knn_con10[1,2] +  + knn_con10[1,3] + knn_con10[2,1] + knn_con10[2,3] + knn_con10[3,1] + knn_con10[3,2])/sum(knn_con10)
+
+mpg.pred.knn_error20 = (knn_con20[1,2] + knn_con20[1,3] + knn_con20[2,1] + knn_con20[2,3] + knn_con20[3,1] + knn_con20[3,2])/sum(knn_con20)
+
+
+#####Comparing the three methods and their errors rates in order: LDA, 
+comparison = c(mpg.pred.lda_error, mpg.pred.log_reg_error, mpg.pred.knn_error5, mpg.pred.knn_error10, mpg.pred.knn_error20)
+
+comparison100 <- rbind(comparison100, comparison)
+
+}
+##Repeating the above 100 times to get avg error rate.
+comparison100 <- colMeans(comparison100)
+```
+
+```{r}
+comparison100
+```
+
+##After running 100 times with randomly selected training and testing data each run:
+
+###Using Linear Discriminant Analysis I was able to predict the type of seeds of the testing data with 96.18105% Accuracy, and a 3.8318953% error rate.
+
+##Using multinomial logistic regression, I was able to predict the type of seed of the testing data with 95.17523% Accuracy, and a 4.824768% error rate.
+
+###Kth Nearest Neighbors with:
+#k =5, accuracy 98.55414%, error rate 1.445859%
+#10, accuracy 97.56404%, error rate 2.43595%
+#k=20 , accuracy 96.18105%, error rate 3.818953%
+
+### AS K increases, the error rate increases. Makes sense since the data set is so small. When the number of neighbors considered increases, 
+```
+
+
+####Clustering
+```{r, warning = F, message = F}
+true_class <- seeds$type
+seed_standard <- scale(seeds)
+seed_clust <- seeds[-8]
+
+nclust <- (nrow(seed_clust)-1)*sum(apply(seed_clust,2,var))
+for (i in 2:15) nclust[i] <- sum(kmeans(seed_clust, 
+   centers=i)$withinss)
+plot(1:15, nclust, type="b", xlab="Number of Clusters",
+  ylab="Within groups sum of squares")
+
+#The elbow is at 3. so I will use 3 clusters.
+
+# K-Means clustering with 3 clusters
+fit <- kmeans(seed_clust, centers = 3) 
+
+
+# get cluster means 
+#aggregate(seed_clust,by=list(fit$cluster),FUN=mean)
+# append cluster assignment
+#seed_clust <- data.frame(seed_clust, fit$cluster)
+
+#plot(fit, data=seed_clust, class = ')
+
+
+
+seedstr1 <- seeds[, which(names(seeds) != "type")]
+seedstr1 <- scale(seedstr1)
+seeds_clu <- kmeans(x = seedstr1, centers = 3, nstart = 50)
+plot(seeds_clu, data = seeds, class = "type")
+
+seeds_error_table <- table(seeds$type, seeds_clu$cluster)
+
+error_rate_kmeans <- (seeds_error_table[1,1] + seeds_error_table[1,2] + seeds_error_table[2,2] + seeds_error_table[2,3] +  seeds_error_table[3,1] + seeds_error_table[3,3]) / sum(seeds_error_table)
+
+plot(table(seeds$type, seeds_clu$cluster),  main="Confusion matrix for seeds clustering",
+      xlab="True Type", ylab="K-means clustering")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#######CARS 
+```{r, warning = F, message = F}
+cardata <- read.csv("~/Desktop/School/STA 160/STA_160_Project_Midterm/imports-85.data", header=FALSE,
+                    stringsAsFactors = FALSE) 
+colnames(cardata) <- c("symboling", "norm_loss", "make", "fuel", "aspiration", "ndoors", "body", "drive", "engine_loc", "wheel_base", "length", "width", "height", "weight", "engine_type", "ncyl", "engine_size", "fuel_sys", "bore", "stroke", "compress_rat", "hp", "rpm", "cmpg", "hmpg", "price")
+cardata_full <- cardata[-2] %>% na.omit()
+cardata[cardata == "?"] <- NA
+cardata <- cardata[-1]
+cardata <- cardata[-1]
+cardata <- cardata %>% na.omit()
+```
+
+
+#Exploratory
+```{r, warning = F, message = F}
+str(cardata)
+summary(cardata)
+
+plot_ly(cardata, x = ~ncyl, type = "histogram")
+
+corrgram(cardata, lower.panel = panel.pie)
+
+ggplot(data = cardata, aes(y = (as.numeric(price)/1000), x = hmpg)) + geom_point()
+
+cardata5 <- cardata %>% filter(ncyl == 'four' | ncyl == 'five' | ncyl == "six")
+p <- ggplot(data = cardata5, aes(y = (as.numeric(price)/1000),x = hmpg)) + geom_point()
+p + facet_grid(rows = vars(ncyl))
+
+
+plot(x = cardata$hmpg, y = cardata$cmpg, type = 'p')
+plot(x = cardata$hp, y = cardata$hmpg, type = 'p')
+plot(x = cardata$weight, y = cardata$hmpg, type = 'p')
+plot(x = as.factor(cardata$ncyl), y = cardata$hmpg, type = 'p')
+plot(x = cardata$engine_size, y = cardata$hp, type = 'p')
+plot(x = cardata$weight, y = cardata$hp, type = 'p')
+plot(x = cardata$hp, type = 'h')
+scatter.smooth(x=cardata$hmpg, y=cardata$price, main="Dist ~ Speed") 
+plot(density(as.numeric(cardata$price)), main="Density Plot for Price", ylab="Frequency", xlab = "Price")
+scatter.smooth(x = cardata$engine_size, y = cardata$price, ylab = 'Price', xlab = 'Engine_size')
+
+plot(density(as.numeric(cardata$hmpg)), main="Density Plot for Highway and City Miles per Gallon",
+     ylab="Frequency", xlab = "Red = City MPG, Blue = Highway MPG", col = 'blue') 
+lines(density(as.numeric(cardata$cmpg)), col= 'red')
+
+ggplot(cardata, aes(as.numeric(hp), as.numeric(hmpg))) +
+  stat_smooth() + geom_point() +
+  ylab("Highway Miles per Gallon") +
+  xlab ("No. of Horsepower") +
+  ggtitle("Impact of Number of Horsepower on MPG")
+
+ggplot(cardata, aes(x = as.numeric(cmpg), y = as.numeric(hmpg))) +
+  stat_smooth() + geom_point() +
+  ylab("Highway Miles per Gallon") +
+  xlab ("City Miles per Gallon") +
+  ggtitle("Relationship Between City and Highway Miles Per Gallon")
+
+cor(cardata$hmpg, cardata$cmpg)
+```
+
+
+##Prediction of price
+####train/test data split 70/30
+```{r, warning = F, message = F}
+#Remove engine_loc
+class_cardata <- cardata[-7]
+#Remove make
+class_cardata <- class_cardata[-1]
+class_cardata <- class_cardata %>% filter(engine_type != "rotor" & ncyl != "three" & ncyl != "twelve" & fuel_sys != 'spfi' & fuel_sys != 'mfi' & ncyl != 'eight')
+
+class_cardata <- transform(
+  class_cardata,
+  bore = as.numeric(bore),
+  stroke = as.numeric(stroke),
+  hp = as.numeric(hp), 
+  rpm = as.numeric(rpm), 
+  price = as.numeric(price),
+  nycl = as.character(ncyl)
+)
+class_cardata <- class_cardata %>% na.omit()
+
+price_pred_comparisons <- 0
+for(i in 1:100){
+  
+train = sample(1:185, 132, replace=FALSE)
+test = setdiff(1:185,train)
+
+cardata.tr = class_cardata[train,]
+cardata.te = class_cardata[test,]
+
+
+
+###Predicting the price of a car 
+
+#I predict the price of a vehicle with a linear model and all data USE LDA
+f <- reformulate(setdiff(colnames(cardata.tr), "price"), response="price")
+car_lda <- lm(f, data = cardata.tr)
+#anova(car_lda)
+car_full_price_lda_predict <- predict(object = car_lda, newdata = cardata.te)
+
+car_price_LDA_MSE <- (1/ length(cardata.te$price)) * sum((as.numeric(cardata.te$price) - as.numeric(car_full_price_lda_predict)) ^ 2)
+car_price_LDA_RMSE <- sqrt(car_price_LDA_MSE)
+#The RMSE is 3220.474
+
+#By analyzing the ANOVA, I will remove vars with P value < .05 as they aren't significant. 
+#I remove fuel_sys, bore, compress_rat, cmpg and redo it.
+
+cardata.tr2 = class_cardata[train,-c(15,16,18,21)]
+cardata.te2 = class_cardata[test,-c(15,16,18,21)]
+f <- reformulate(setdiff(colnames(cardata.tr2), "price"), response="price")
+car_lda2 <- lm(f, data = cardata.tr2)
+#anova(car_lda2)
+car_lda_predict2 <- predict(object = car_lda2, newdata = cardata.te2)
+
+car_reduced_price_lda_MSE <- (1/ length(cardata.te2$price)) * sum((as.numeric(cardata.te2$price) - as.numeric(car_lda_predict2)) ^ 2)
+car_reduced_price_LDA_RMSE <- sqrt(car_reduced_price_lda_MSE)
+##The RMSE is 2990.248
+#Root Mean Square Error (RMSE) is the standard deviation of the residuals (prediction errors). Residuals are a measure of how far from the regression line data points are; RMSE is a measure of how spread out these residuals are. In other words, it tells you how concentrated the data is around the line of best fit.
+
+
+
+
+#Now I redo the prediction of price with linear model without any of the categorical variables
+
+class_cardata_reduced <- class_cardata %>% dplyr::select(wheel_base,length, width, height, weight, engine_size, bore, stroke, compress_rat, hp, rpm, cmpg, hmpg, price)
+
+class_cardata_reduced$rpm <- as.numeric(class_cardata_reduced$rpm)
+
+cardata.tr1 = class_cardata_reduced[train,]
+cardata.te1 = class_cardata_reduced[test,]
+
+
+f <- reformulate(setdiff(colnames(cardata.tr1), "price"), response="price")
+car_lda1 <- lm(f, data = cardata.tr1)
+#car_lda1
+#anova(car_lda1)
+
+car_lda_predict1 <- predict(object = car_lda1, newdata = cardata.te1)
+
+car_numeric_price_LDA_MSE <- (1/ length(cardata.te1$price)) * sum((as.numeric(cardata.te1$price) - as.numeric(car_lda_predict1)) ^ 2)
+car_numeric_price_LDA_RMSE <- sqrt(car_numeric_price_LDA_MSE)
+#RMSE 3017.644 is better than the model with the categorical variables before i removed insig.v.
+
+#After performing anova, I see that bore,cmpg, hmpg are insignificant(p-value less than .05) so i remove them.
+
+class_cardata_reduced <- class_cardata %>% dplyr::select(wheel_base,length, width, height, weight, engine_size, stroke, compress_rat, hp, rpm, price)
+class_cardata_reduced$rpm <- as.numeric(class_cardata_reduced$rpm)
+
+cardata.tr1 = class_cardata_reduced[train,]
+cardata.te1 = class_cardata_reduced[test,]
+
+f <- reformulate(setdiff(colnames(cardata.tr1), "price"), response="price")
+car_lda1 <- lm(f, data = cardata.tr1)
+#car_lda1
+#anova(car_lda1)
+
+car_lda_predict1 <- predict(object = car_lda1, newdata = cardata.te1)
+
+car_signif_price_LDA_MSE1 <- (1/ length(cardata.te1$price)) * sum((as.numeric(cardata.te1$price) - as.numeric(car_lda_predict1)) ^ 2)
+car_numred_price_LDA_RMSE <- sqrt(car_signif_price_LDA_MSE1)
+  #2923.697 , better than all 3 previous models.
+
+
+
+##Now predict the price with random forest, all variables
+randf_cardata <-  cardata_full %>%  filter(engine_type != "rotor" & ncyl != "three" & ncyl != "twelve" & fuel_sys != 'spfi' & fuel_sys != 'mfi' & ncyl != 'eight')
+#sapply(randf_cardata, class)
+randf_cardata <- transform(
+  randf_cardata,
+  symboling = as.factor(symboling),
+  make = as.factor(make),
+  fuel = as.factor(fuel),
+  aspiration = as.factor(aspiration),
+  ndoors = as.factor(ndoors),
+  body = as.factor(body),
+  drive = as.factor(drive),
+  engine_loc = as.factor(engine_loc),
+  weight = as.numeric(weight),
+  engine_type = as.factor(engine_type),
+  ncyl = as.factor(ncyl),
+  engine_size = as.numeric(engine_size),
+  fuel_sys = as.factor(fuel_sys),
+  bore = as.numeric(bore),
+  stroke = as.numeric(stroke),
+  hp = as.numeric(hp),
+  rpm = as.numeric(rpm),
+  cmpg = as.numeric(cmpg),
+  hmpg = as.numeric(hmpg),
+  price = as.numeric(price)
+)
+randf_cardata <- randf_cardata %>% na.omit()
+
+train = sample(1:187, 132, replace=FALSE)
+test = setdiff(1:87,train)
+
+cardata.tr = randf_cardata[train,]
+cardata.te = randf_cardata[test,]
+
+rf <- randomForest(
+  price ~.,
+  data = cardata.tr
+)
+#print(importance(rf))
+#print(sort(importance(rf)))
+pred <- predict(rf, newdata = cardata.te[-25])
+
+
+car_rf_MSE <- (1/ length(cardata.te$price)) * sum((as.numeric(cardata.te$price) - as.numeric(pred)) ^ 2)
+rf_price_RMSE <- sqrt(car_rf_MSE)
+
+
+
+price_pred_comparison = c(car_price_LDA_RMSE, car_reduced_price_LDA_RMSE, car_numeric_price_LDA_RMSE,
+                          car_numred_price_LDA_RMSE, rf_price_RMSE)
+price_pred_comparisons <- rbind(price_pred_comparisons, price_pred_comparison)
+}
+price_pred_comparisons <- colMeans(price_pred_comparisons)
+price_pred_comparisons
+```
+
+
+####Want to predict the highway MPG of a car
+```{r, warning = F, message = F}
+hmpg_preds <- 0 
+
+for( i in 1:100){
+class_cardata$price <- as.numeric(class_cardata$price)
+train = sample(1:185, 132, replace=FALSE)
+test = setdiff(1:185,train)
+cardata.tr = class_cardata[train,]
+cardata.te = class_cardata[test,]
+
+f <- reformulate(setdiff(colnames(cardata.tr), "hmpg"), response="hmpg")
+car_lda <- lm(f, data = cardata.tr)
+#anova(car_lda)
+#car_lda
+car_lda_predict <- predict(object = car_lda, newdata = cardata.te)
+
+car_MSE <- (1/ length(cardata.te$hmpg)) * sum((as.numeric(cardata.te$hmpg) - as.numeric(car_lda_predict)) ^ 2)
+car_hmpg_LDA_RMSE <- sqrt(car_MSE)
+#The RMSE is 1.550937
+
+#By analyzing the ANOVA, I will remove vars with P value < .05 as they aren't significant. 
+#I remove height,stroke and redo it.
+
+class_cardata1 <- class_cardata[,-c(6,10,12,17,17,23)]
+cardata.tr5 = class_cardata1[train,]
+cardata.te5 = class_cardata1[test,]
+
+f <- reformulate(setdiff(colnames(cardata.tr5), "hmpg"), response="hmpg")
+car_lda5 <- lm(f, data = cardata.tr5)
+#anova(car_lda5)
+car_lda_predict5 <- predict(object = car_lda5, newdata = cardata.te5)
+
+car_MSE5 <- (1/ length(cardata.te5$hmpg)) * sum((as.numeric(cardata.te5$hmpg) - as.numeric(car_lda_predict5)) ^ 2)
+car_red_hmpg_LDA_RMSE <- sqrt(car_MSE5)
+##The RMSE is 1.522771, a small improvement when i remove height and stroke.
+
+## When I remove engine_loc, height, engine_type, stroke, price, the error increases by .13 SD's, so some of the variables are correlated. This could be a reoccuring issue beacuse of Multicollinearity. For exmaple, the width and wheelbase of a car are highly correlated( cor = 0.81), so are cmpg and hmpg(cor = 0.97), so the effect one of these predcitor variables has on the predicted price could be innacurate.
+
+
+
+##Predict MPG with random forest
+
+randf_cardata <-  cardata_full %>%  filter(engine_type != "rotor" & ncyl != "three" & ncyl != "twelve" & fuel_sys != 'spfi' & fuel_sys != 'mfi')
+#sapply(randf_cardata, class)
+randf_cardata <- transform(
+  randf_cardata,
+  symboling = as.factor(symboling),
+  make = as.factor(make),
+  fuel = as.factor(fuel),
+  aspiration = as.factor(aspiration),
+  ndoors = as.factor(ndoors),
+  body = as.factor(body),
+  drive = as.factor(drive),
+  engine_loc = as.factor(engine_loc),
+  weight = as.numeric(weight),
+  engine_type = as.factor(engine_type),
+  ncyl = as.factor(ncyl),
+  engine_size = as.numeric(engine_size),
+  fuel_sys = as.factor(fuel_sys),
+  bore = as.numeric(bore),
+  stroke = as.numeric(stroke),
+  hp = as.numeric(hp),
+  rpm = as.numeric(rpm),
+  cmpg = as.numeric(cmpg),
+  hmpg = as.numeric(hmpg),
+  price = as.numeric(price)
+)
+randf_cardata <- randf_cardata %>% na.omit()
+
+train = sample(1:191, 132, replace=FALSE)
+test = setdiff(1:191,train)
+
+cardata.tr = randf_cardata[train,]
+cardata.te = randf_cardata[test,]
+
+rf <- randomForest(
+  hmpg ~.,
+  data = cardata.tr
+)
+
+pred <- predict(rf, newdata = cardata.te[-24])
+#print(importance(rf))
+
+car_rf_MSE <- (1/ length(cardata.te$hmpg)) * sum((as.numeric(cardata.te$hmpg) - as.numeric(pred)) ^ 2)
+car_rf_RMSE <- sqrt(car_rf_MSE)
+
+comp <- c(car_hmpg_LDA_RMSE, car_red_hmpg_LDA_RMSE, car_rf_RMSE)
+hmpg_preds <- rbind(hmpg_preds, comp)
+}
+hmpg_preds = colMeans(hmpg_preds)
+hmpg_preds
+```
+
+
+###WANT to see how many dimensions are really necessary. PCA
+```{r, warning = F, message = F}
+class_cardata_reduced <- class_cardata %>% dplyr::select(wheel_base,length, width, height, weight, engine_size, bore, stroke, compress_rat, hp, rpm, cmpg, hmpg, price)
+class_cardata_reduced$rpm <- as.numeric(class_cardata_reduced$rpm)
+class_cardata_reduced$price <- as.numeric(class_cardata_reduced$price)
+cardata.pca <- prcomp(class_cardata_reduced[,c(1:14)], center = T, scale = T)
+summary(cardata.pca)
+## You can reduce the 14  dimensions down to 4 and retain 85.362% of the original variance
+
+
+##biplot for PC1 and PC2 which explain 70.17% of the original variance
+ggbiplot::ggbiplot(cardata.pca)
+
+##biplot for PC3 and PC4 which explain 15.192% of the original variance
+ggbiplot::ggbiplot(cardata.pca,choices=c(3,4))
+```
+
+
+##Want to use clustering to see how distinguishable the data is based on hmpg. Using cluster 1 is hmpg less than 28, medium is between 28 and 33, and high is above 33.
+#```{r}
+attach(cardata)
+lowmpg = cardata[(hmpg < 28),]
+medmpg = cardata[(hmpg > 27 & hmpg < 34),]
+highmpg = cardata[(hmpg > 33),]
+
+
+medmpg = data[(mpg < 32 | mpg > 16),]
+highmpg = data[(mpg > 32),]
+lowset = data[lowmpg, ('mpg' = "1")]
+class = c(1:391,1)
+data.lr = data.frame(class,data)
+lowmpg
+
+true_class <- cardata$type
+seed_standard <- scale(seeds)
+seed_clust <- seeds[-8]
+
+nclust <- (nrow(seed_clust)-1)*sum(apply(seed_clust,2,var))
+for (i in 2:15) nclust[i] <- sum(kmeans(seed_clust, 
+   centers=i)$withinss)
+plot(1:15, nclust, type="b", xlab="Number of Clusters",
+  ylab="Within groups sum of squares")
+
+#The elbow is at 3. so I will use 3 clusters.
+
+# K-Means clustering with 3 clusters
+fit <- kmeans(seed_clust, centers = 3) 
+
+
+# get cluster means 
+#aggregate(seed_clust,by=list(fit$cluster),FUN=mean)
+# append cluster assignment
+#seed_clust <- data.frame(seed_clust, fit$cluster)
+
+#plot(fit, data=seed_clust, class = ')
+
+
+
+seedstr1 <- seeds[, which(names(seeds) != "type")]
+seedstr1 <- scale(seedstr1)
+seeds_clu <- kmeans(x = seedstr1, centers = 3, nstart = 50)
+plot(seeds_clu, data = seeds, class = "type")
+
+#table(seeds$type, seeds_clu$cluster)
+
+#plot(table(seeds$type, seeds_clu$cluster),  main="Confusion matrix for seeds clustering",
+      xlab="True Type", ylab="K-means clustering")
+```
